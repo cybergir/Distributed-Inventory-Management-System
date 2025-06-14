@@ -56,7 +56,7 @@ python-multipart==0.0.6
 ### 1. Clone and setup
 
 ```bash
-git clone
+git clone https://github.com/cybergir/Distributed-Inventory-Management-System.git
 cd inventory-system
 ```
 
