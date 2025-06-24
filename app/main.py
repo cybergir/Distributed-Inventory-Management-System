@@ -10,24 +10,40 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, Integer, String
 from dotenv import load_dotenv
 import os
+from kafka import KafkaProducer
 
 
 load_dotenv()
 
 app = FastAPI()
 
+
 # Database setup
 DATABASE_URL = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
 r = redis.Redis(
-    host='localhost',
+    host='redis',
     port=6379,
     db=0,
     decode_responses=True
 )
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+# Kafka producer
+kafka_producer = KafkaProducer(
+    bootstrap_servers='kafka:9092',
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 class InventoryItem(Base):
     __tablename__ = "inventory_items"
@@ -58,7 +74,16 @@ def create_item(item: ItemCreate, db=Depends(get_db)):
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
+
+    # Send Kafka event
+    kafka_producer.send('inventory_updates', {
+        'event': 'item_created',
+        'item_id': db_item.id,
+        'name': db_item.name
+    })
+
     r.delete(f"item_{db_item.id}") 
+    
     return db_item
 
 @app.get("/items/{item_id}")
